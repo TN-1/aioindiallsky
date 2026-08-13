@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aioindiallsky"
+version = "0.1.0"
+description = "Asynchronous Python client library for indi-allsky API & WebSocket event stream."
+readme = "README.md"
+authors = [
+    { name = "@TN-1", email = "hamish@hamishwest.xyz" }
+]
+license = { text = "MIT" }
+requires-python = ">=3.9"
+keywords = [
+    "indi-allsky",
+    "allsky",
+    "home-assistant",
+    "asyncio",
+    "aiohttp",
+    "astronomy",
+    "camera",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Framework :: AsyncIO",
+]
+dependencies = [
+    "aiohttp>=3.8.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.20.0",
+    "aioresponses>=0.7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/TN-1/aioindiallsky"
+Repository = "https://github.com/TN-1/aioindiallsky"
+Issues = "https://github.com/TN-1/aioindiallsky/issues"
+Changelog = "https://github.com/TN-1/aioindiallsky/releases"
+Documentation = "https://github.com/TN-1/aioindiallsky#readme"
+
+[tool.setuptools.package-data]
+aioindiallsky = ["py.typed"]
