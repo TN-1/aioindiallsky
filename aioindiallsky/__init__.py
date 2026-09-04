@@ -14,7 +14,7 @@ from .models import ExposureData, SensorData, MediaData
 try:
     __version__ = version("aioindiallsky")
 except PackageNotFoundError:
-    __version__ = "0.1.0"
+    __version__ = "0.1.1"
 
 __all__ = [
     "IndiAllSkyClient",

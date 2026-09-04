@@ -1,6 +1,7 @@
 """Async Client for indi-allsky WebSocket API."""
 import asyncio
 import inspect
+import ipaddress
 import json
 import logging
 import ssl as ssl_module
@@ -23,6 +24,17 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT = 10.0
 
 
+def _normalize_host(host: str) -> str:
+    """Normalize host for URL formatting, wrapping IPv6 addresses in brackets."""
+    host_clean = host.strip("[]")
+    try:
+        if ipaddress.ip_address(host_clean).version == 6:
+            return f"[{host_clean}]"
+    except ValueError:
+        pass
+    return host
+
+
 class IndiAllSkyClient:
     """Async Client for communicating with indi-allsky over HTTP and WebSocket endpoints."""
 
@@ -40,9 +52,10 @@ class IndiAllSkyClient:
         self.ssl = ssl
         self._api_key = api_key
         self.request_timeout = request_timeout
+        self._formatted_host = _normalize_host(host)
         
         protocol = "https" if ssl else "http"
-        self.base_url = f"{protocol}://{host}:{port}/indi-allsky"
+        self.base_url = f"{protocol}://{self._formatted_host}:{port}/indi-allsky"
 
         self._session = session
         self._owned_session = False
@@ -63,13 +76,13 @@ class IndiAllSkyClient:
     def events_url(self) -> str:
         """Get the clean public WebSocket events URL (without credentials)."""
         ws_protocol = "wss" if self.ssl else "ws"
-        return f"{ws_protocol}://{self.host}:{self.port}/indi-allsky/ws/events"
+        return f"{ws_protocol}://{self._formatted_host}:{self.port}/indi-allsky/ws/events"
 
     @property
     def control_url(self) -> str:
         """Get the clean public WebSocket control URL (without credentials)."""
         ws_protocol = "wss" if self.ssl else "ws"
-        return f"{ws_protocol}://{self.host}:{self.port}/indi-allsky/ws/control"
+        return f"{ws_protocol}://{self._formatted_host}:{self.port}/indi-allsky/ws/control"
 
     @property
     def is_connected(self) -> bool:

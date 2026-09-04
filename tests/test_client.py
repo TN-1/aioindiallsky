@@ -37,6 +37,20 @@ async def test_get_image_url(client):
 
 
 @pytest.mark.asyncio
+async def test_ipv6_url_building():
+    client_ipv6 = IndiAllSkyClient(host="2001:db8::1", port=8080, api_key="test_key")
+    assert client_ipv6.base_url == "http://[2001:db8::1]:8080/indi-allsky"
+    assert client_ipv6.events_url == "ws://[2001:db8::1]:8080/indi-allsky/ws/events"
+    assert client_ipv6.control_url == "ws://[2001:db8::1]:8080/indi-allsky/ws/control"
+
+    # Already bracketed IPv6
+    client_bracketed = IndiAllSkyClient(host="[2001:db8::1]", port=443, ssl=True)
+    assert client_bracketed.base_url == "https://[2001:db8::1]:443/indi-allsky"
+    assert client_bracketed.events_url == "wss://[2001:db8::1]:443/indi-allsky/ws/events"
+    assert client_bracketed.control_url == "wss://[2001:db8::1]:443/indi-allsky/ws/control"
+
+
+@pytest.mark.asyncio
 async def test_fetch_image_success():
     client = IndiAllSkyClient(host="127.0.0.1")
     fake_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF"  # JPEG magic header
