@@ -57,6 +57,12 @@ def test_exposure_data_from_dict_null_safety():
     assert exp.sqm is None
 
 
+def test_exposure_data_unsupported_temp():
+    raw = {"temp": -273.15}
+    exp = ExposureData.from_dict(raw)
+    assert exp.temp is None
+
+
 def test_sensor_data_from_dict():
     raw = {
         "last_update": "2026-08-13 20:00:00",

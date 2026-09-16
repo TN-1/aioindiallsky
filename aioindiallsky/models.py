@@ -2,6 +2,8 @@
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, List
 
+_UNSUPPORTED_TEMPERATURE = -273.15
+
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
     if val is None:
@@ -25,7 +27,10 @@ def _safe_optional_float(val: Any) -> Optional[float]:
     if val is None:
         return None
     try:
-        return float(val)
+        f = float(val)
+        if round(f, 2) <= _UNSUPPORTED_TEMPERATURE:
+            return None
+        return f
     except (ValueError, TypeError):
         return None
 
