@@ -66,16 +66,41 @@ def test_exposure_data_unsupported_temp():
 def test_sensor_data_from_dict():
     raw = {
         "last_update": "2026-08-13 20:00:00",
-        "sensors": {"temp": {"name": "Temperature", "value": 22.5, "unit": "C"}},
-        "sensor_user": [1, 2],
-        "sensor_temp": [22.5],
+        "sensors": {
+            "custom_ambient_temp": {"name": "Temperature", "value": 22.5, "unit": "C"},
+        },
+        "sensor_user": [0, 50.0, 14.2, -2.5, 75.0, 25.0, 180.0, 20.1, 19.8, 14200.0],
+        "sensor_temp": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 48.5],
     }
     sensor = SensorData.from_dict(raw)
     assert sensor.last_update == "2026-08-13 20:00:00"
-    assert "temp" in sensor.sensors
-    assert sensor.sensors["temp"]["value"] == 22.5
-    assert sensor.raw_user == [1, 2]
+    assert "custom_ambient_temp" in sensor.sensors
+    assert sensor.raw_user == [0, 50.0, 14.2, -2.5, 75.0, 25.0, 180.0, 20.1, 19.8, 14200.0]
+    assert sensor.raw_temp == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 48.5]
     assert sensor.raw_data == raw
+    # Normalized fields extracted from raw_user / raw_temp slots
+    assert sensor.dew_heater == 50.0
+    assert sensor.dew_point == 14.2
+    assert sensor.frost_point == -2.5
+    assert sensor.fan_duty_cycle == 75.0
+    assert sensor.heat_index == 25.0
+    assert sensor.wind_direction == 180.0
+    assert sensor.device_sqm == 20.1
+    assert sensor.camera_sqm == 19.8
+    assert sensor.camera_sqm_adu == 14200.0
+    assert sensor.cpu_temperature == 48.5
+
+
+def test_sensor_data_fallback_slots_and_cpu_temp():
+    raw = {
+        "sensors": {},
+        "sensor_user": [0, 0, 12.3, 0, 0, 0, 0, 0, 0, 9999.0],
+        "sensor_temp": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 62.4],
+    }
+    sensor = SensorData.from_dict(raw)
+    assert sensor.dew_point == 12.3
+    assert sensor.camera_sqm_adu == 9999.0
+    assert sensor.cpu_temperature == 62.4
 
 
 def test_media_data_from_dict():

@@ -81,6 +81,24 @@ class ExposureData:
         )
 
 
+def _extract_slot_value(lst: List[Any], index: int) -> Optional[float]:
+    if index < len(lst):
+        item = lst[index]
+        res = item.get("value") if isinstance(item, dict) else item
+        return _safe_optional_float(res)
+    return None
+
+
+def _extract_cpu_temp(raw_temp: List[Any]) -> Optional[float]:
+    if len(raw_temp) > 10:
+        item = raw_temp[10]
+        res = item.get("value") if isinstance(item, dict) else item
+        f_val = _safe_optional_float(res)
+        if f_val is not None and f_val > 0:
+            return round(f_val, 1)
+    return None
+
+
 @dataclass
 class SensorData:
     last_update: Optional[str]
@@ -88,6 +106,16 @@ class SensorData:
     raw_user: List[Any]
     raw_temp: List[Any]
     raw_data: Optional[Dict[str, Any]] = None
+    dew_heater: Optional[float] = None
+    dew_point: Optional[float] = None
+    frost_point: Optional[float] = None
+    fan_duty_cycle: Optional[float] = None
+    heat_index: Optional[float] = None
+    wind_direction: Optional[float] = None
+    device_sqm: Optional[float] = None
+    camera_sqm: Optional[float] = None
+    camera_sqm_adu: Optional[float] = None
+    cpu_temperature: Optional[float] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SensorData":
@@ -99,12 +127,62 @@ class SensorData:
         temp_raw = data.get("sensor_temp")
         raw_temp_list: List[Any] = temp_raw if isinstance(temp_raw, list) else []
 
+        dew_heater = _safe_optional_float(data.get("dew_heater"))
+        if dew_heater is None:
+            dew_heater = _extract_slot_value(raw_user_list, 1)
+
+        dew_point = _safe_optional_float(data.get("dew_point"))
+        if dew_point is None:
+            dew_point = _extract_slot_value(raw_user_list, 2)
+
+        frost_point = _safe_optional_float(data.get("frost_point"))
+        if frost_point is None:
+            frost_point = _extract_slot_value(raw_user_list, 3)
+
+        fan_duty_cycle = _safe_optional_float(data.get("fan_duty_cycle"))
+        if fan_duty_cycle is None:
+            fan_duty_cycle = _extract_slot_value(raw_user_list, 4)
+
+        heat_index = _safe_optional_float(data.get("heat_index"))
+        if heat_index is None:
+            heat_index = _extract_slot_value(raw_user_list, 5)
+
+        wind_direction = _safe_optional_float(data.get("wind_direction"))
+        if wind_direction is None:
+            wind_direction = _extract_slot_value(raw_user_list, 6)
+
+        device_sqm = _safe_optional_float(data.get("device_sqm"))
+        if device_sqm is None:
+            device_sqm = _extract_slot_value(raw_user_list, 7)
+
+        camera_sqm = _safe_optional_float(data.get("camera_sqm"))
+        if camera_sqm is None:
+            camera_sqm = _extract_slot_value(raw_user_list, 8)
+
+        camera_sqm_adu = _safe_optional_float(data.get("camera_sqm_adu"))
+        if camera_sqm_adu is None:
+            camera_sqm_adu = _extract_slot_value(raw_user_list, 9)
+
+        cpu_temperature = _safe_optional_float(data.get("cpu_temperature"))
+        if cpu_temperature is None:
+            cpu_temperature = _extract_cpu_temp(raw_temp_list)
+
         return cls(
             last_update=str(last_up) if last_up is not None else None,
             sensors=sensors_dict,
             raw_user=raw_user_list,
             raw_temp=raw_temp_list,
             raw_data=data,
+            dew_heater=dew_heater,
+            dew_point=dew_point,
+            frost_point=frost_point,
+            fan_duty_cycle=fan_duty_cycle,
+            heat_index=heat_index,
+            wind_direction=wind_direction,
+            device_sqm=device_sqm,
+            camera_sqm=camera_sqm,
+            camera_sqm_adu=camera_sqm_adu,
+            cpu_temperature=cpu_temperature,
         )
 
 
