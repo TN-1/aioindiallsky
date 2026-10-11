@@ -9,12 +9,12 @@ from .exceptions import (
     IndiAllSkyAuthError,
     IndiAllSkyCommandError,
 )
-from .models import ExposureData, SensorData, MediaData, MonthItem, VideoItem, ImageItem
+from .models import ExposureData, SensorData, MediaData, CameraItem, MonthItem, VideoItem, ImageItem
 
 try:
     __version__ = version("aioindiallsky")
 except PackageNotFoundError:
-    __version__ = "0.1.5"
+    __version__ = "0.1.6"
 
 __all__ = [
     "IndiAllSkyClient",
@@ -26,6 +26,7 @@ __all__ = [
     "ExposureData",
     "SensorData",
     "MediaData",
+    "CameraItem",
     "MonthItem",
     "VideoItem",
     "ImageItem",

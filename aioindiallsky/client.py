@@ -18,7 +18,7 @@ from .exceptions import (
     IndiAllSkyAuthError,
     IndiAllSkyCommandError,
 )
-from .models import ExposureData, SensorData, MediaData, MonthItem, VideoItem, ImageItem
+from .models import ExposureData, SensorData, MediaData, CameraItem, MonthItem, VideoItem, ImageItem
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,7 @@ class IndiAllSkyClient:
         self._owned_session = False
         self._logged_in = False
         self._csrf_token: Optional[str] = None
+        self._default_camera_id: Optional[int] = None
         self._ws_events: Optional[aiohttp.ClientWebSocketResponse] = None
         self._ws_control: Optional[aiohttp.ClientWebSocketResponse] = None
         self._running = False
@@ -207,11 +208,63 @@ class IndiAllSkyClient:
                                 m = re.search(r'name=\"csrf_token\" type=\"hidden\" value=\"([^\"]+)\"', text)
                             if m:
                                 self._csrf_token = m.group(1)
+
+                            if self._default_camera_id is None:
+                                m_cam = re.search(r'<input[^>]*name=\"CAMERA_ID\"[^>]*value=\"(\d+)\"', text)
+                                if m_cam:
+                                    self._default_camera_id = int(m_cam.group(1))
+
+                            if self._csrf_token:
                                 return self._csrf_token
             except Exception as e:
                 logger.debug("Failed probing CSRF token at %s: %s", probe_url, e)
 
         return None
+
+    async def get_cameras(self) -> List[CameraItem]:
+        """Discover available cameras configured on indi-allsky."""
+        await self._ensure_logged_in()
+        session = await self._get_session()
+        url = f"{self.base_url}/videoviewer"
+        if self._api_key:
+            url += f"?api_key={self._api_key}"
+
+        try:
+            async with asyncio.timeout(self.request_timeout):
+                async with session.get(url, ssl=self.ssl) as resp:
+                    resp.raise_for_status()
+                    text = await resp.text()
+                    m = re.findall(r'<select[^>]*id=\"CAMERA_SELECT\"[^>]*>(.*?)</select>', text, re.DOTALL)
+                    cameras: List[CameraItem] = []
+                    if m:
+                        for val, label in re.findall(r'<option[^>]*value=\"(\d+)\"[^>]*>([^<]+)</option>', m[0]):
+                            cam_id = int(val)
+                            cameras.append(CameraItem(id=cam_id, name=label.strip()))
+                            if self._default_camera_id is None:
+                                self._default_camera_id = cam_id
+                    if not cameras:
+                        m_cam = re.search(r'<input[^>]*name=\"CAMERA_ID\"[^>]*value=\"(\d+)\"', text)
+                        if m_cam:
+                            cam_id = int(m_cam.group(1))
+                            cameras.append(CameraItem(id=cam_id, name=f"Camera {cam_id}"))
+                            self._default_camera_id = cam_id
+                    return cameras
+        except TimeoutError as e:
+            raise IndiAllSkyTimeoutError(f"Timeout fetching cameras: {e}") from e
+        except Exception as e:
+            raise IndiAllSkyConnectionError(f"Failed to fetch cameras: {e}") from e
+
+    async def get_default_camera_id(self) -> int:
+        """Resolve active camera ID, caching discovered value."""
+        if self._default_camera_id is not None:
+            return self._default_camera_id
+        try:
+            cams = await self.get_cameras()
+            if cams:
+                return cams[0].id
+        except Exception as e:
+            logger.debug("Failed discovering default camera ID: %s", e)
+        return 0
 
     async def post_json(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """POST JSON to an indi-allsky endpoint, ensuring authenticated session and CSRF."""
@@ -280,7 +333,8 @@ class IndiAllSkyClient:
 
     async def get_image_years(self, camera_id: int = 0) -> List[int]:
         """Extract available capture image years via imageviewer endpoint."""
-        res = await self.get_image_catalog(camera_id=camera_id, year=0)
+        cid = camera_id if camera_id > 0 else await self.get_default_camera_id()
+        res = await self.get_image_catalog(camera_id=cid, year=0)
         years_data = res.get("YEAR_SELECT", [])
         years: List[int] = []
         for item in years_data:
@@ -300,8 +354,9 @@ class IndiAllSkyClient:
         time_of_day: str = "",
     ) -> Dict[str, Any]:
         """Query video viewer catalog (/ajax/videoviewer) for years, months, or video lists."""
+        cid = camera_id if camera_id > 0 else await self.get_default_camera_id()
         payload: Dict[str, Any] = {
-            "CAMERA_ID": camera_id,
+            "CAMERA_ID": cid,
             "YEAR_SELECT": year,
             "MONTH_SELECT": month,
             "TIMEOFDAY_SELECT": time_of_day,
@@ -318,8 +373,9 @@ class IndiAllSkyClient:
         filter_detections: bool = False,
     ) -> Dict[str, Any]:
         """Query image viewer catalog (/ajax/imageviewer) for years, months, days, hours, or images."""
+        cid = camera_id if camera_id > 0 else await self.get_default_camera_id()
         payload: Dict[str, Any] = {
-            "CAMERA_ID": camera_id,
+            "CAMERA_ID": cid,
             "YEAR_SELECT": year,
             "MONTH_SELECT": month,
             "DAY_SELECT": day,

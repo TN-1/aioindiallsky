@@ -210,6 +210,12 @@ class MediaData:
 
 
 @dataclass
+class CameraItem:
+    id: int
+    name: str
+
+
+@dataclass
 class MonthItem:
     month: int
     name: str
