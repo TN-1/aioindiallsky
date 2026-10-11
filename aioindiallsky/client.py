@@ -44,6 +44,8 @@ class IndiAllSkyClient:
         port: int = 8080,
         ssl: Union[bool, ssl_module.SSLContext] = False,
         api_key: Optional[str] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
         session: Optional[aiohttp.ClientSession] = None,
         request_timeout: float = DEFAULT_TIMEOUT,
     ):
@@ -51,6 +53,8 @@ class IndiAllSkyClient:
         self.port = port
         self.ssl = ssl
         self._api_key = api_key
+        self._username = username
+        self._password = password
         self.request_timeout = request_timeout
         self._formatted_host = _normalize_host(host)
         
@@ -59,6 +63,7 @@ class IndiAllSkyClient:
 
         self._session = session
         self._owned_session = False
+        self._logged_in = False
         self._ws_events: Optional[aiohttp.ClientWebSocketResponse] = None
         self._ws_control: Optional[aiohttp.ClientWebSocketResponse] = None
         self._running = False
@@ -117,8 +122,50 @@ class IndiAllSkyClient:
             url += f"?api_key={self._api_key}"
         return url
 
+    async def login(self) -> bool:
+        """Authenticate with indi-allsky using native username and password credentials."""
+        if not self._username or not self._password:
+            raise IndiAllSkyAuthError("Username and password must be configured to log in")
+
+        session = await self._get_session()
+        login_url = f"{self.base_url}/login"
+        payload = {
+            "USERNAME": self._username,
+            "PASSWORD": self._password,
+            "NEXT": "",
+        }
+
+        try:
+            async with asyncio.timeout(self.request_timeout):
+                async with session.post(
+                    login_url, json=payload, ssl=self.ssl
+                ) as resp:
+                    if resp.status in (400, 401, 403):
+                        try:
+                            err_data = await resp.json()
+                            msg = err_data.get("form_global", ["Invalid credentials"])[0]
+                        except Exception:
+                            msg = f"HTTP {resp.status}"
+                        raise IndiAllSkyAuthError(f"Login failed: {msg}")
+                    resp.raise_for_status()
+                    self._logged_in = True
+                    return True
+        except IndiAllSkyAuthError:
+            self._logged_in = False
+            raise
+        except TimeoutError as e:
+            raise IndiAllSkyTimeoutError(f"Timeout logging in to {self.host}:{self.port}") from e
+        except Exception as e:
+            raise IndiAllSkyConnectionError(f"Failed connecting to login endpoint: {e}") from e
+
+    async def _ensure_logged_in(self) -> None:
+        """Log in if credentials are provided and session has not yet authenticated."""
+        if self._username and self._password and not self._logged_in:
+            await self.login()
+
     async def fetch_image(self, path_or_filename: str) -> bytes:
         """Fetch raw binary image bytes (JPEG/PNG) for a given image file or path."""
+        await self._ensure_logged_in()
         session = await self._get_session()
         url = self.get_image_url(path_or_filename)
         try:
@@ -175,6 +222,7 @@ class IndiAllSkyClient:
 
     async def connect(self) -> None:
         """Connect to the indi-allsky read-only WebSocket event stream (/ws/events)."""
+        await self._ensure_logged_in()
         session = await self._get_session()
         try:
             async with asyncio.timeout(self.request_timeout):
@@ -197,6 +245,7 @@ class IndiAllSkyClient:
         if self._ws_control and not self._ws_control.closed:
             return
 
+        await self._ensure_logged_in()
         session = await self._get_session()
         try:
             async with asyncio.timeout(self.request_timeout):

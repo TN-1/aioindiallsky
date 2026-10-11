@@ -228,3 +228,55 @@ async def test_is_connected_properties(client):
     mock_ws_control.closed = False
     client._ws_control = mock_ws_control
     assert client.is_control_connected is True
+
+
+@pytest.mark.asyncio
+async def test_login_success():
+    client = IndiAllSkyClient(
+        host="127.0.0.1", username="admin", password="password123"
+    )
+    mock_response = AsyncMock()
+    mock_response.status = 200
+    mock_response.raise_for_status = MagicMock()
+
+    mock_context = AsyncMock()
+    mock_context.__aenter__.return_value = mock_response
+    mock_context.__aexit__.return_value = None
+
+    mock_session = MagicMock()
+    mock_session.post.return_value = mock_context
+
+    with patch.object(client, "_get_session", return_value=mock_session):
+        assert await client.login() is True
+        assert client._logged_in is True
+        mock_session.post.assert_called_once_with(
+            "http://127.0.0.1:8080/indi-allsky/login",
+            json={"USERNAME": "admin", "PASSWORD": "password123", "NEXT": ""},
+            ssl=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_login_failure():
+    from aioindiallsky import IndiAllSkyAuthError
+
+    client = IndiAllSkyClient(
+        host="127.0.0.1", username="admin", password="wrongpassword"
+    )
+    mock_response = AsyncMock()
+    mock_response.status = 400
+    mock_response.json = AsyncMock(
+        return_value={"form_global": ["Invalid username or password"]}
+    )
+
+    mock_context = AsyncMock()
+    mock_context.__aenter__.return_value = mock_response
+    mock_context.__aexit__.return_value = None
+
+    mock_session = MagicMock()
+    mock_session.post.return_value = mock_context
+
+    with patch.object(client, "_get_session", return_value=mock_session):
+        with pytest.raises(IndiAllSkyAuthError, match="Invalid username or password"):
+            await client.login()
+        assert client._logged_in is False
