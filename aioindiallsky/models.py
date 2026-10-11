@@ -207,3 +207,100 @@ class MediaData:
             id=_safe_optional_int(data.get("id")),
             raw_data=data,
         )
+
+
+@dataclass
+class MonthItem:
+    month: int
+    name: str
+
+    @classmethod
+    def from_entry(cls, entry: Any) -> Optional["MonthItem"]:
+        if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+            try:
+                m_int = int(entry[0])
+                return cls(month=m_int, name=str(entry[1]))
+            except (ValueError, TypeError):
+                return None
+        return None
+
+
+@dataclass
+class VideoItem:
+    id: int
+    url: str
+    day_date: str
+    day_date_long: str
+    night: bool
+    success: bool
+    keogram_url: Optional[str] = None
+    keogram_thumbnail_url: Optional[str] = None
+    startrail_url: Optional[str] = None
+    startrail_thumbnail_url: Optional[str] = None
+    startrail_timelapse_url: Optional[str] = None
+    panorama_timelapse_url: Optional[str] = None
+    avg_stars: Optional[int] = None
+    avg_sqm: Optional[float] = None
+    max_kpindex: Optional[float] = None
+    max_moonphase: Optional[float] = None
+    raw_data: Optional[Dict[str, Any]] = None
+
+    @property
+    def mime_type(self) -> str:
+        return "video/mp4"
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "VideoItem":
+        def _clean_str(val: Any) -> Optional[str]:
+            if val is None or val == "None" or val == "":
+                return None
+            return str(val)
+
+        return cls(
+            id=_safe_int(data.get("id"), 0),
+            url=str(data.get("url", "") or ""),
+            day_date=str(data.get("dayDate", "") or ""),
+            day_date_long=str(data.get("dayDate_long", "") or ""),
+            night=bool(data.get("night", False)),
+            success=bool(data.get("success", False)),
+            keogram_url=_clean_str(data.get("keogram")),
+            keogram_thumbnail_url=_clean_str(data.get("keogram_thumbnail")),
+            startrail_url=_clean_str(data.get("startrail")),
+            startrail_thumbnail_url=_clean_str(data.get("startrail_thumbnail")),
+            startrail_timelapse_url=_clean_str(data.get("startrail_timelapse")),
+            panorama_timelapse_url=_clean_str(data.get("panorama_timelapse")),
+            avg_stars=_safe_optional_int(data.get("avg_stars")),
+            avg_sqm=_safe_optional_float(data.get("avg_sqm")),
+            max_kpindex=_safe_optional_float(data.get("max_kpindex")),
+            max_moonphase=_safe_optional_float(data.get("max_moonphase")),
+            raw_data=data,
+        )
+
+
+@dataclass
+class ImageItem:
+    id: int
+    url: str
+    timestamp: int
+    time_str: str
+    width: int
+    height: int
+    raw_data: Optional[Dict[str, Any]] = None
+
+    @property
+    def mime_type(self) -> str:
+        if self.url.lower().endswith(".png"):
+            return "image/png"
+        return "image/jpeg"
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ImageItem":
+        return cls(
+            id=_safe_int(data.get("id"), 0),
+            url=str(data.get("url", "") or ""),
+            timestamp=_safe_int(data.get("ts"), 0),
+            time_str=str(data.get("date", "") or ""),
+            width=_safe_int(data.get("width"), 0),
+            height=_safe_int(data.get("height"), 0),
+            raw_data=data,
+        )

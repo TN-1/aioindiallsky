@@ -4,6 +4,7 @@ import inspect
 import ipaddress
 import json
 import logging
+import re
 import ssl as ssl_module
 import sys
 import types
@@ -17,7 +18,7 @@ from .exceptions import (
     IndiAllSkyAuthError,
     IndiAllSkyCommandError,
 )
-from .models import ExposureData, SensorData, MediaData
+from .models import ExposureData, SensorData, MediaData, MonthItem, VideoItem, ImageItem
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ class IndiAllSkyClient:
         self._session = session
         self._owned_session = False
         self._logged_in = False
+        self._csrf_token: Optional[str] = None
         self._ws_events: Optional[aiohttp.ClientWebSocketResponse] = None
         self._ws_control: Optional[aiohttp.ClientWebSocketResponse] = None
         self._running = False
@@ -185,6 +187,241 @@ class IndiAllSkyClient:
     async def fetch_latest_image(self) -> bytes:
         """Fetch raw binary bytes for the latest static snapshot image."""
         return await self.fetch_image("public/latest.jpg")
+
+    async def _ensure_csrf_token(self) -> Optional[str]:
+        """Fetch or return the active CSRF token for the session."""
+        if self._csrf_token:
+            return self._csrf_token
+
+        session = await self._get_session()
+        # Fetch videoviewer or login page to obtain session cookie and CSRF token
+        probe_urls = [f"{self.base_url}/videoviewer", f"{self.base_url}/login"]
+        for probe_url in probe_urls:
+            try:
+                async with asyncio.timeout(self.request_timeout):
+                    async with session.get(probe_url, ssl=self.ssl) as resp:
+                        if resp.status == 200:
+                            text = await resp.text()
+                            m = re.search(r'xhr\.setRequestHeader\(\"X-CSRFToken\",\s*\"([^\"]+)\"\)', text)
+                            if not m:
+                                m = re.search(r'name=\"csrf_token\" type=\"hidden\" value=\"([^\"]+)\"', text)
+                            if m:
+                                self._csrf_token = m.group(1)
+                                return self._csrf_token
+            except Exception as e:
+                logger.debug("Failed probing CSRF token at %s: %s", probe_url, e)
+
+        return None
+
+    async def post_json(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """POST JSON to an indi-allsky endpoint, ensuring authenticated session and CSRF."""
+        await self._ensure_logged_in()
+        csrf_token = await self._ensure_csrf_token()
+        session = await self._get_session()
+        clean_path = path.lstrip("/")
+        url = f"{self.base_url}/{clean_path}"
+        if self._api_key:
+            url += f"?api_key={self._api_key}"
+
+        # Standard ports 80/443 must be omitted from Referer to satisfy strict CSRF same-origin checks
+        port_str = f":{self.port}" if (self.port != 80 if not self.ssl else self.port != 443) else ""
+        protocol = "https" if self.ssl else "http"
+        referer_url = f"{protocol}://{self._formatted_host}{port_str}/indi-allsky/"
+
+        headers: Dict[str, str] = {
+            "Referer": referer_url,
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        if csrf_token:
+            headers["X-CSRFToken"] = csrf_token
+
+        try:
+            async with asyncio.timeout(self.request_timeout):
+                async with session.post(url, json=payload, headers=headers, ssl=self.ssl) as resp:
+                    if resp.status in (401, 403):
+                        raise IndiAllSkyAuthError(
+                            f"Authentication failed for {clean_path}: HTTP {resp.status}"
+                        )
+                    resp.raise_for_status()
+                    return await resp.json()
+        except IndiAllSkyAuthError:
+            raise
+        except TimeoutError as e:
+            raise IndiAllSkyTimeoutError(
+                f"Timeout requesting {clean_path} from {self.host}:{self.port}"
+            ) from e
+        except Exception as e:
+            raise IndiAllSkyConnectionError(
+                f"Failed requesting {clean_path}: {e}"
+            ) from e
+
+    async def get_video_years(self) -> List[int]:
+        """Extract available video/timelapse years by parsing the videoviewer page."""
+        await self._ensure_logged_in()
+        session = await self._get_session()
+        url = f"{self.base_url}/videoviewer"
+        if self._api_key:
+            url += f"?api_key={self._api_key}"
+
+        try:
+            async with asyncio.timeout(self.request_timeout):
+                async with session.get(url, ssl=self.ssl) as resp:
+                    resp.raise_for_status()
+                    text = await resp.text()
+                    m = re.findall(r'<select[^>]*id=\"YEAR_SELECT\"[^>]*>(.*?)</select>', text, re.DOTALL)
+                    if m:
+                        years = [int(y) for y in re.findall(r'<option[^>]*value=\"(\d+)\"', m[0])]
+                        return sorted(years, reverse=True)
+                    return []
+        except TimeoutError as e:
+            raise IndiAllSkyTimeoutError(f"Timeout fetching video years: {e}") from e
+        except Exception as e:
+            raise IndiAllSkyConnectionError(f"Failed to fetch video years: {e}") from e
+
+    async def get_image_years(self, camera_id: int = 0) -> List[int]:
+        """Extract available capture image years via imageviewer endpoint."""
+        res = await self.get_image_catalog(camera_id=camera_id, year=0)
+        years_data = res.get("YEAR_SELECT", [])
+        years: List[int] = []
+        for item in years_data:
+            if isinstance(item, (list, tuple)) and item and str(item[0]).isdigit():
+                years.append(int(item[0]))
+            elif isinstance(item, int):
+                years.append(item)
+            elif isinstance(item, str) and item.isdigit():
+                years.append(int(item))
+        return sorted(years, reverse=True)
+
+    async def get_video_catalog(
+        self,
+        camera_id: int = 0,
+        year: int = 0,
+        month: int = 0,
+        time_of_day: str = "",
+    ) -> Dict[str, Any]:
+        """Query video viewer catalog (/ajax/videoviewer) for years, months, or video lists."""
+        payload: Dict[str, Any] = {
+            "CAMERA_ID": camera_id,
+            "YEAR_SELECT": year,
+            "MONTH_SELECT": month,
+            "TIMEOFDAY_SELECT": time_of_day,
+        }
+        return await self.post_json("ajax/videoviewer", payload)
+
+    async def get_image_catalog(
+        self,
+        camera_id: int = 0,
+        year: int = 0,
+        month: int = 0,
+        day: int = 0,
+        hour: int = -1,
+        filter_detections: bool = False,
+    ) -> Dict[str, Any]:
+        """Query image viewer catalog (/ajax/imageviewer) for years, months, days, hours, or images."""
+        payload: Dict[str, Any] = {
+            "CAMERA_ID": camera_id,
+            "YEAR_SELECT": year,
+            "MONTH_SELECT": month,
+            "DAY_SELECT": day,
+            "HOUR_SELECT": hour,
+            "FILTER_DETECTIONS": filter_detections,
+        }
+        return await self.post_json("ajax/imageviewer", payload)
+
+    def get_media_url(self, path_or_filename: str) -> str:
+        """Alias for get_image_url returning full HTTP URL for any media asset."""
+        return self.get_image_url(path_or_filename)
+
+    async def get_video_months(self, year: int, camera_id: int = 0) -> List[MonthItem]:
+        """Get available months for a video catalog year."""
+        res = await self.get_video_catalog(camera_id=camera_id, year=year, month=0)
+        months_data = res.get("MONTH_SELECT", [])
+        months: List[MonthItem] = []
+        for entry in months_data:
+            item = MonthItem.from_entry(entry)
+            if item is not None and item.month > 0:
+                months.append(item)
+        return months
+
+    async def get_videos(
+        self,
+        year: int,
+        month: int,
+        camera_id: int = 0,
+        time_of_day: str = "",
+    ) -> List[VideoItem]:
+        """Get list of video items for a given year and month."""
+        res = await self.get_video_catalog(
+            camera_id=camera_id, year=year, month=month, time_of_day=time_of_day
+        )
+        video_list = res.get("video_list", [])
+        return [VideoItem.from_dict(v) for v in video_list if isinstance(v, dict)]
+
+    async def get_image_months(self, year: int, camera_id: int = 0) -> List[MonthItem]:
+        """Get available months for an image catalog year."""
+        res = await self.get_image_catalog(camera_id=camera_id, year=year, month=0)
+        months_data = res.get("MONTH_SELECT", [])
+        months: List[MonthItem] = []
+        for entry in months_data:
+            item = MonthItem.from_entry(entry)
+            if item is not None and item.month > 0:
+                months.append(item)
+        return months
+
+    async def get_image_days(
+        self, year: int, month: int, camera_id: int = 0
+    ) -> List[int]:
+        """Get available days for an image catalog year and month."""
+        res = await self.get_image_catalog(camera_id=camera_id, year=year, month=month, day=0)
+        days_data = res.get("DAY_SELECT", [])
+        days: List[int] = []
+        for entry in days_data:
+            if isinstance(entry, (list, tuple)) and entry and str(entry[0]).isdigit():
+                days.append(int(entry[0]))
+            elif isinstance(entry, int):
+                days.append(entry)
+            elif isinstance(entry, str) and entry.isdigit():
+                days.append(int(entry))
+        return sorted(days, reverse=True)
+
+    async def get_image_hours(
+        self, year: int, month: int, day: int, camera_id: int = 0
+    ) -> List[int]:
+        """Get available hours for an image catalog date."""
+        res = await self.get_image_catalog(
+            camera_id=camera_id, year=year, month=month, day=day, hour=-1
+        )
+        hours_data = res.get("HOUR_SELECT", [])
+        hours: List[int] = []
+        for entry in hours_data:
+            if isinstance(entry, (list, tuple)) and entry and str(entry[0]).isdigit():
+                hours.append(int(entry[0]))
+            elif isinstance(entry, int):
+                hours.append(entry)
+            elif isinstance(entry, str) and entry.isdigit():
+                hours.append(int(entry))
+        return sorted(hours, reverse=True)
+
+    async def get_images(
+        self,
+        year: int,
+        month: int,
+        day: int,
+        hour: int,
+        camera_id: int = 0,
+        filter_detections: bool = False,
+    ) -> List[ImageItem]:
+        """Get list of images for a specific hour."""
+        res = await self.get_image_catalog(
+            camera_id=camera_id,
+            year=year,
+            month=month,
+            day=day,
+            hour=hour,
+            filter_detections=filter_detections,
+        )
+        images_data = res.get("IMAGE_DATA", [])
+        return [ImageItem.from_dict(img) for img in images_data if isinstance(img, dict)]
 
     async def __aenter__(self) -> "IndiAllSkyClient":
         return self
