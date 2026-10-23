@@ -89,12 +89,35 @@ def _extract_slot_value(lst: List[Any], index: int) -> Optional[float]:
     return None
 
 
-def _extract_cpu_temp(raw_temp: List[Any]) -> Optional[float]:
+_TEMP_UNIT_ALIASES: Dict[str, str] = {
+    "c": "°C",
+    "°c": "°C",
+    "f": "°F",
+    "°f": "°F",
+    "k": "K",
+}
+
+_ZERO_CELSIUS_BY_UNIT: Dict[str, float] = {
+    "°C": 0.0,
+    "°F": 32.0,
+    "K": 273.15,
+}
+
+
+def _normalize_temp_unit(val: Any) -> Optional[str]:
+    if not isinstance(val, str) or not val.strip():
+        return None
+    cleaned = val.strip()
+    return _TEMP_UNIT_ALIASES.get(cleaned.lower(), cleaned)
+
+
+def _extract_cpu_temp(raw_temp: List[Any], temp_unit: str = "°C") -> Optional[float]:
     if len(raw_temp) > 10:
         item = raw_temp[10]
         res = item.get("value") if isinstance(item, dict) else item
         f_val = _safe_optional_float(res)
-        if f_val is not None and f_val > 0:
+        zero_baseline = _ZERO_CELSIUS_BY_UNIT.get(temp_unit, 0.0)
+        if f_val is not None and round(f_val, 2) > zero_baseline:
             return round(f_val, 1)
     return None
 
@@ -106,6 +129,7 @@ class SensorData:
     raw_user: List[Any]
     raw_temp: List[Any]
     raw_data: Optional[Dict[str, Any]] = None
+    temp_unit: str = "°C"
     dew_heater: Optional[float] = None
     dew_point: Optional[float] = None
     frost_point: Optional[float] = None
@@ -126,6 +150,17 @@ class SensorData:
         raw_user_list: List[Any] = user_raw if isinstance(user_raw, list) else []
         temp_raw = data.get("sensor_temp")
         raw_temp_list: List[Any] = temp_raw if isinstance(temp_raw, list) else []
+
+        temp_unit = _normalize_temp_unit(data.get("temp_unit"))
+        if temp_unit is None:
+            for key in ("camera_temp", "dew_point", "frost_point", "heat_index"):
+                slot_item = sensors_dict.get(key)
+                if isinstance(slot_item, dict):
+                    temp_unit = _normalize_temp_unit(slot_item.get("unit"))
+                    if temp_unit is not None:
+                        break
+        if temp_unit is None:
+            temp_unit = "°C"
 
         dew_heater = _safe_optional_float(data.get("dew_heater"))
         if dew_heater is None:
@@ -165,7 +200,7 @@ class SensorData:
 
         cpu_temperature = _safe_optional_float(data.get("cpu_temperature"))
         if cpu_temperature is None:
-            cpu_temperature = _extract_cpu_temp(raw_temp_list)
+            cpu_temperature = _extract_cpu_temp(raw_temp_list, temp_unit)
 
         return cls(
             last_update=str(last_up) if last_up is not None else None,
@@ -173,6 +208,7 @@ class SensorData:
             raw_user=raw_user_list,
             raw_temp=raw_temp_list,
             raw_data=data,
+            temp_unit=temp_unit,
             dew_heater=dew_heater,
             dew_point=dew_point,
             frost_point=frost_point,

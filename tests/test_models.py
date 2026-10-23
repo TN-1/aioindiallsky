@@ -98,9 +98,39 @@ def test_sensor_data_fallback_slots_and_cpu_temp():
         "sensor_temp": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 62.4],
     }
     sensor = SensorData.from_dict(raw)
+    assert sensor.temp_unit == "°C"
     assert sensor.dew_point == 12.3
     assert sensor.camera_sqm_adu == 9999.0
     assert sensor.cpu_temperature == 62.4
+
+
+def test_sensor_data_declared_temp_unit():
+    raw = {
+        "temp_unit": "°F",
+        "sensors": {
+            "dew_point": {"name": "Dew Point", "value": 48.3, "unit": "°F"},
+        },
+        "sensor_user": [0, 0, 48.3, 44.3, 0, 61.2],
+        "sensor_temp": [32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 118.4],
+    }
+    sensor = SensorData.from_dict(raw)
+    assert sensor.temp_unit == "°F"
+    assert sensor.dew_point == 48.3
+    assert sensor.frost_point == 44.3
+    assert sensor.heat_index == 61.2
+    assert sensor.cpu_temperature == 118.4
+
+
+def test_sensor_data_unpopulated_cpu_temp_fahrenheit():
+    raw = {
+        "temp_unit": "°F",
+        "sensors": {},
+        "sensor_user": [0, 0, 48.3],
+        "sensor_temp": [32.0] * 15,
+    }
+    sensor = SensorData.from_dict(raw)
+    assert sensor.temp_unit == "°F"
+    assert sensor.cpu_temperature is None
 
 
 def test_media_data_from_dict():
