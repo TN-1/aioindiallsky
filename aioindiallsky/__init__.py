@@ -14,7 +14,7 @@ from .models import ExposureData, SensorData, MediaData, CameraItem, MonthItem, 
 try:
     __version__ = version("aioindiallsky")
 except PackageNotFoundError:
-    __version__ = "0.1.6"
+    __version__ = "0.1.7"
 
 __all__ = [
     "IndiAllSkyClient",
